@@ -1,0 +1,315 @@
+\documentclass[11pt]{article}
+
+% ----------------------------------------------------------------------
+% Packages
+% ----------------------------------------------------------------------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage[margin=1in]{geometry}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+\usepackage{enumitem}
+
+% ----------------------------------------------------------------------
+% Title
+% ----------------------------------------------------------------------
+\title{Reinforcement Learning on the Taxi Environment:\\
+       Tabular Q-learning and a DQN Comparison}
+\author{Asier Ugarteche}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We solve the Gymnasium \texttt{Taxi} environment with \textbf{tabular Q-learning} and
+study how hyperparameter choices affect performance. After a manually tuned baseline, we
+compare three automated tuning strategies --- grid search, random search, and Hyperband
+(via Optuna). All four configurations ultimately solve the task with a $100\%$ success
+rate, which illustrates a key point: on a small, deterministic environment like Taxi,
+hyperparameters influence \emph{how fast} the agent learns more than \emph{how well} it
+ends up performing. We close with a section on the \textbf{Deep Q-Network (DQN)} approach,
+which replaces the Q-table with a neural network, and discuss when that added machinery is
+warranted.
+\end{abstract}
+
+% ======================================================================
+\section{The Taxi environment}
+% ======================================================================
+Taxi is a $5\times5$ grid world. The agent drives a taxi to a passenger, picks them up,
+drives to a destination, and drops them off. The environment has:
+\begin{itemize}[noitemsep]
+  \item \textbf{500 states} --- $25$ taxi positions $\times\;5$ passenger locations
+        (four pickup spots plus ``inside the taxi'') $\times\;4$ destinations;
+  \item \textbf{6 actions} --- South, North, East, West, Pickup, Dropoff;
+  \item \textbf{rewards} --- $-1$ per step, $+20$ for a correct dropoff, $-10$ for an
+        illegal pickup/dropoff.
+\end{itemize}
+Crucially, Taxi is \emph{deterministic}: a trained agent should deliver the passenger every
+single time. With only 500 discrete states, the problem is small enough that a lookup
+table over $(\text{state}, \text{action})$ pairs is a natural and sufficient representation
+--- which is exactly what tabular Q-learning uses.
+
+% ======================================================================
+\section{Tabular Q-learning (without DQN)}
+% ======================================================================
+
+\subsection{The algorithm}
+Q-learning stores one value $Q(s,a)$ per state--action pair in a
+$500 \times 6$ table, initialised to zero. At each step the agent takes an
+$\epsilon$-greedy action and updates the table using the Bellman rule:
+\begin{equation}
+  Q(s,a) \;\leftarrow\; Q(s,a) \;+\; \alpha\,\Bigl[\,r + \gamma \max_{a'} Q(s',a') - Q(s,a)\,\Bigr].
+  \label{eq:bellman}
+\end{equation}
+Exploration is annealed over training with an exponential schedule,
+\begin{equation}
+  \epsilon(\text{ep}) \;=\; \epsilon_{\min} + (\epsilon_{\max} - \epsilon_{\min})\,
+  e^{-\,\texttt{decay\_rate}\,\cdot\,\text{ep}} ,
+  \label{eq:epsilon}
+\end{equation}
+so the agent explores heavily early and increasingly exploits its learned policy later.
+
+\subsection{Hyperparameters}
+\label{sec:hyperparameters}
+The behaviour of tabular Q-learning is governed entirely by a handful of hyperparameters.
+Table~\ref{tab:hyperparams} lists each one, its symbol in Eqs.~\eqref{eq:bellman}--\eqref{eq:epsilon},
+its role, and the value used in the manual baseline (Part~1).
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}llcl@{}}
+\toprule
+\textbf{Hyperparameter} & \textbf{Symbol} & \textbf{Manual value} & \textbf{Role} \\
+\midrule
+\texttt{learning\_rate} & $\alpha$            & $0.7$    & step size of the Bellman update \\
+\texttt{gamma}          & $\gamma$            & $0.95$   & discount on future reward \\
+\texttt{total\_episodes}& ---                 & $25{,}000$ & number of training episodes \\
+\texttt{max\_steps}     & ---                 & $200$    & step cap per episode \\
+\texttt{max\_epsilon}   & $\epsilon_{\max}$   & $1.0$    & initial exploration rate \\
+\texttt{min\_epsilon}   & $\epsilon_{\min}$   & $0.01$   & exploration floor \\
+\texttt{decay\_rate}    & ---                 & $0.0005$ & speed of $\epsilon$ decay \\
+\bottomrule
+\end{tabular}
+\caption{Q-learning hyperparameters and their manual-baseline values.}
+\label{tab:hyperparams}
+\end{table}
+
+\noindent\textbf{How each one matters.}
+\begin{itemize}[noitemsep]
+  \item \texttt{learning\_rate} ($\alpha$): how strongly each new experience overwrites the
+        current estimate. High values learn fast but can be unstable; low values are smoother
+        but slower.
+  \item \texttt{gamma} ($\gamma$): how much the agent values future reward. Close to $1$ makes
+        it far-sighted, which suits Taxi because the big $+20$ reward only arrives at the end
+        of a successful trip.
+  \item \texttt{min\_epsilon} and \texttt{decay\_rate}: together they shape the
+        exploration-to-exploitation transition. A \emph{low} \texttt{min\_epsilon} lets the
+        agent commit to its learned policy once it knows enough; \texttt{decay\_rate} sets how
+        quickly it gets there. These two turned out to be the most influential hyperparameters
+        (Section~\ref{sec:comparison}).
+  \item \texttt{total\_episodes} and \texttt{max\_steps}: the training budget and the per-episode
+        horizon. $200$ steps is comfortably above the $\sim$13 steps an optimal policy needs.
+\end{itemize}
+
+\noindent\textbf{Evaluation note.} Throughout, the trained Q-table is evaluated with a small
+residual exploration rate $\epsilon = 0.05$ rather than pure greedy. On a fully deterministic
+environment a greedy policy would replay the exact same episode every time; keeping a little
+randomness gives a more realistic estimate of behaviour. This choice slightly lowers the
+measured reward (occasional random actions cost a step or two), which matters when comparing
+against the DQN results in Section~\ref{sec:dqn}.
+
+\subsection{Part 1 --- Manual training}
+With the values in Table~\ref{tab:hyperparams}, the agent trained for $25{,}000$ episodes.
+The learning curve climbs steeply in the first few thousand episodes and then flattens once a
+solid policy is found. The evaluated baseline:
+\[
+  \text{avg reward } 5.63, \qquad \text{avg steps } 13.6, \qquad \text{success } 100\%.
+\]
+
+% Uncomment and provide the exported figure to include the learning curve:
+% \begin{figure}[h]\centering
+%   \includegraphics[width=0.7\linewidth]{manual_learning_curve.png}
+%   \caption{Manual-baseline learning curve: episode reward (left axis) and $\epsilon$ (right axis).}
+% \end{figure}
+
+\subsection{Part 2 --- Grid search}
+Grid search trains every combination of a fixed set of values: \texttt{learning\_rate}
+$\in\{0.3, 0.7\}$, \texttt{gamma} $\in\{0.85, 0.95, 0.99\}$, \texttt{decay\_rate}
+$\in\{0.0005, 0.002\}$, and \texttt{min\_epsilon} $\in\{0.01, 0.05\}$ --- $24$ combinations in
+total. Each was trained for $10{,}000$ episodes (cheaper than the full $25{,}000$) and scored
+by the mean reward over the last $1{,}000$ episodes. It is exhaustive but constrained to the
+predefined grid points. The best configuration scored $7.45$:
+\[
+  \texttt{learning\_rate}=0.3,\quad \texttt{gamma}=0.85,\quad
+  \texttt{decay\_rate}=0.002,\quad \texttt{min\_epsilon}=0.01 .
+\]
+The clear pattern was that a low \texttt{min\_epsilon} ($0.01$) and a lower
+\texttt{learning\_rate} ($0.3$) performed best.
+
+\subsection{Part 3 --- Random search}
+Instead of a fixed grid, random search samples $30$ configurations from continuous ranges:
+\texttt{learning\_rate} $\sim U(0.1, 0.9)$, \texttt{gamma} $\sim U(0.80, 0.999)$,
+\texttt{decay\_rate} $\sim U(0.0001, 0.005)$, \texttt{min\_epsilon} $\sim U(0.001, 0.1)$. With
+the same number of trials it covers the space better than grid because it is not pinned to
+predetermined points. The best trial scored $7.79$:
+\[
+  \texttt{learning\_rate}=0.646,\quad \texttt{gamma}=0.828,\quad
+  \texttt{decay\_rate}=0.00108,\quad \texttt{min\_epsilon}=0.00173 .
+\]
+The scatter-matrix analysis again singled out \texttt{min\_epsilon}: lower values consistently
+correlated with higher scores.
+
+\subsection{Part 4 --- Hyperband with Optuna}
+Grid and random search waste compute by training every configuration for the full budget,
+regardless of how it is doing. \textbf{Hyperband} runs the search like a tournament: it starts
+many configurations on a small budget, eliminates the worst, and gives more episodes only to
+the survivors. We implement this with \textbf{Optuna} (a TPE sampler combined with its
+\texttt{HyperbandPruner}) over the same continuous ranges as random search, for $40$ trials.
+The best trial scored $7.82$:
+\[
+  \texttt{learning\_rate}=0.849,\quad \texttt{gamma}=0.868,\quad
+  \texttt{decay\_rate}=0.0047,\quad \texttt{min\_epsilon}=0.0011 .
+\]
+
+\subsection{Part 5 --- Final comparison}
+\label{sec:comparison}
+The best configuration from each method was retrained for the full $25{,}000$ episodes and
+evaluated identically. Table~\ref{tab:search} summarises the best configurations and their
+search scores; Table~\ref{tab:final} reports the final evaluation.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+\textbf{Method} & $\alpha$ & $\gamma$ & \texttt{decay\_rate} & \texttt{min\_epsilon} & \textbf{Search score} \\
+\midrule
+Manual          & $0.70$ & $0.95$ & $0.0005$  & $0.0100$  & --- \\
+Grid search     & $0.30$ & $0.85$ & $0.0020$  & $0.0100$  & $7.45$ \\
+Random search   & $0.646$& $0.828$& $0.00108$ & $0.00173$ & $7.79$ \\
+Optuna/Hyperband& $0.849$& $0.868$& $0.0047$  & $0.0011$  & $7.82$ \\
+\bottomrule
+\end{tabular}
+\caption{Best configuration found by each method (search score = mean reward over the last
+$1{,}000$ of $10{,}000$ training episodes).}
+\label{tab:search}
+\end{table}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Method} & \textbf{Avg reward} & \textbf{Avg steps} & \textbf{Success rate} \\
+\midrule
+Manual           & $\mathbf{5.63}$ & $\mathbf{13.6}$ & $100\%$ \\
+Grid search      & $5.55$ & $13.9$ & $100\%$ \\
+Random search    & $4.99$ & $13.8$ & $100\%$ \\
+Optuna/Hyperband & $5.27$ & $14.0$ & $100\%$ \\
+\bottomrule
+\end{tabular}
+\caption{Final evaluation after retraining each best config for $25{,}000$ episodes
+(evaluation uses $\epsilon = 0.05$).}
+\label{tab:final}
+\end{table}
+
+\noindent\textbf{Analysis.} Two observations stand out:
+\begin{enumerate}[noitemsep]
+  \item \textbf{All four methods solve Taxi} ($100\%$ success, $\sim$$13.6$--$14.0$ steps), and
+        their final rewards fall within roughly $0.6$ of each other --- inside the noise
+        introduced by the $\epsilon = 0.05$ evaluation. On a deterministic environment like
+        Taxi, hyperparameters affect \emph{how fast} the agent converges far more than the
+        final policy quality, since the optimal policy is unique and easily representable in a
+        table.
+  \item \textbf{During the search phase}, the adaptive and random methods found
+        higher-scoring configurations (Optuna $7.82$, random $7.79$) than grid ($7.45$),
+        because they explored the continuous space rather than fixed grid points. After full
+        retraining, however, those advantages washed out: the manually chosen configuration
+        was marginally ahead on the final evaluation. This suggests that the $10{,}000$-episode
+        search budget, and the residual-$\epsilon$ evaluation, leave the methods statistically
+        indistinguishable on this problem.
+\end{enumerate}
+The consistent thread across all searches is that \texttt{min\_epsilon} and
+\texttt{decay\_rate} are the most influential hyperparameters: a low exploration floor, reached
+at a sensible pace, lets the agent exploit its learned policy once it has explored enough.
+
+% ======================================================================
+\section{Deep Q-Network (DQN) approach}
+\label{sec:dqn}
+% ======================================================================
+The natural question is what changes if we replace the Q-table with a neural network --- a
+\textbf{Deep Q-Network}. The algorithm is identical (the Bellman update of
+Eq.~\eqref{eq:bellman}); only the \emph{representation} of $Q$ changes.
+
+\subsection{From a Q-table to a function}
+A Q-table stores one number per $(s,a)$ pair --- a lookup. A DQN instead \emph{computes}
+$Q(s,a)$ with a neural network. Because the network cannot consume a raw state ID (the integer
+$499$ is not ``larger'' than $12$ in any meaningful sense), each Taxi state is converted to a
+\textbf{one-hot vector} of length $500$ before being fed to the network. This makes the DQN on
+Taxi close to a tabular method in disguise: with one-hot inputs the network learns essentially
+one independent column of weights per state, so there is little generalisation across states.
+
+\subsection{Architecture and key components}
+The DQN solution uses:
+\begin{itemize}[noitemsep]
+  \item a small multilayer perceptron, $500 \rightarrow 64 \rightarrow 64 \rightarrow 6$
+        (one-hot input, one Q-value per action);
+  \item an \textbf{experience replay buffer} (capacity $50{,}000$) that stores past transitions
+        and samples random minibatches, breaking the correlation between consecutive steps;
+  \item a \textbf{target network} --- a slowly-updated copy of the policy network, synced every
+        $250$ steps --- used to compute a stable Bellman target;
+  \item the Huber (smooth-$L_1$) loss with gradient clipping, optimised by Adam.
+\end{itemize}
+These two stabilisers (replay buffer and target network) are the machinery that distinguishes
+DQN from plain online Q-learning with a function approximator.
+
+\subsection{Hyperparameters and results}
+Representative DQN settings: $\gamma = 0.99$, learning rate $10^{-3}$, batch size $64$,
+replay capacity $50{,}000$, target-update period $250$ steps, $\epsilon$ decayed from $1.0$ to
+$0.05$, trained for $500$ episodes. Evaluated greedily ($\epsilon = 0$), it reaches:
+\[
+  \text{avg reward } 8.04, \qquad \text{avg steps } 13.0, \qquad \text{success } 100\%.
+\]
+
+\subsection{Tabular vs.\ DQN}
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+ & \textbf{Tabular Q-learning} & \textbf{DQN} \\
+\midrule
+$Q$ representation & $500 \times 6$ table        & neural net (one-hot $\rightarrow$ MLP) \\
+State input        & integer ID (table index)    & one-hot vector of length $500$ \\
+Stabilisers        & none needed                 & replay buffer $+$ target network \\
+Training episodes  & $25{,}000$                  & $500$ \\
+Eval reward        & $\sim 5.6$ (at $\epsilon{=}0.05$) & $8.04$ (greedy) \\
+Eval steps         & $\sim 13.6$                 & $13.0$ \\
+Success rate       & $100\%$                     & $100\%$ \\
+\bottomrule
+\end{tabular}
+\caption{Tabular Q-learning versus DQN on Taxi.}
+\label{tab:tabvsdqn}
+\end{table}
+
+\noindent The headline reward gap ($8.04$ vs.\ $\sim$$5.6$) is largely an
+\emph{evaluation-protocol artifact}: the DQN is evaluated greedily while the tabular agent
+keeps $\epsilon = 0.05$, so the tabular score is penalised by occasional random actions. Both
+approaches fully solve Taxi in $\sim$$13$ steps with a $100\%$ success rate. The real takeaway
+is that, for a 500-state problem, a Q-table is the simpler and more natural tool; DQN is
+introduced here as a \emph{learning exercise} for how one would scale to state spaces too large
+to tabulate, where a function approximator becomes mandatory.
+
+% ======================================================================
+\section{Conclusion}
+% ======================================================================
+Tabular Q-learning solves Taxi reliably, and on this small, deterministic problem the choice of
+hyperparameters affects convergence speed more than final quality --- every tuning method we
+tried reached a $100\%$ success rate. The most influential knobs were \texttt{min\_epsilon} and
+\texttt{decay\_rate}, which control how decisively the agent shifts from exploration to
+exploitation. The DQN reaches the same behaviour through a neural network plus a replay buffer
+and a target network; on Taxi that is more machinery than the problem demands, but it is the
+exact recipe one needs when the state space grows beyond what a table can hold.
+
+\end{document}
