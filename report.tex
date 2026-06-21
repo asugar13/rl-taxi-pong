@@ -358,6 +358,32 @@ highest (to the optimal return); the two dropout variants flatline at the failur
 \end{figure}
 
 \paragraph{Stage~2 --- RL hyperparameters.}
+Table~\ref{tab:dqn-rl-space} lists the knobs we search --- what each controls, the range it was
+sampled from, and its default (Part~1) value.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}l p{5.4cm} l l@{}}
+\toprule
+\textbf{Knob} & \textbf{What it does} & \textbf{Search range} & \textbf{Default} \\
+\midrule
+\texttt{lr}               & Adam step size --- how fast the weights move    & $3{\times}10^{-4}$--$5{\times}10^{-3}$ & $10^{-3}$ \\
+\texttt{gamma} ($\gamma$) & discount on future reward (far-sightedness)     & $0.95$--$0.999$                       & $0.99$ \\
+\texttt{decay}            & rate at which exploration $\epsilon$ decays     & $5{\times}10^{-4}$--$4{\times}10^{-3}$ & $1.5{\times}10^{-3}$ \\
+\texttt{batch\_size}      & transitions sampled per gradient step           & $\{32,\,64,\,128\}$                   & $64$ \\
+\texttt{train\_freq}      & one gradient step every $N$ environment steps   & $\{1,\,2,\,4\}$                       & $1$ \\
+\texttt{memory}           & replay-buffer capacity (transitions kept)       & $2{,}000$--$50{,}000$ (log)           & $50{,}000$ \\
+\texttt{update}           & target-network update mechanism                 & hard / soft                           & hard \\
+\texttt{target\_update}   & \emph{(hard)} env steps between target syncs    & $100$--$1000$                         & $250$ \\
+\texttt{tau} ($\tau$)     & \emph{(soft)} fraction the target shifts toward the policy each step & $0.001$--$0.02$ (log) & --- \\
+\bottomrule
+\end{tabular}
+\caption{Stage~2 search space --- the RL hyperparameters, what each controls, the range each was
+sampled from, and its default (Part~1) value.}
+\label{tab:dqn-rl-space}
+\end{table}
+
 A random search of $16$ configurations --- over the learning knobs (learning rate, $\gamma$,
 $\epsilon$-decay), the replay/optimisation settings (batch size, learning frequency), and the
 \textbf{target-update mechanism} (a hard periodic copy vs.\ a soft Polyak update
@@ -380,7 +406,7 @@ choice in particular shows no pattern --- both appear at the top \emph{and} the 
 ranking. The defaults already avoid both failure modes (train every step, $50$k buffer), which is
 why they are robust and nothing beats them. (Tendencies only: the scan is single-seed and varies
 every knob at once.) The full 16-trial search table is in the
-\href{https://github.com/asugar13/rl-taxi-pong/blob/main/DQN_Taxi.ipynb\#rl-search-results-table}{notebook} (Part~2.2).
+\href{https://github.com/asugar13/rl-taxi-pong/blob/main/DQN_Taxi.ipynb}{notebook} (Part~2.2).
 
 \subsection{Ablation: replay buffer and target network}
 \label{sec:dqn-ablation}
