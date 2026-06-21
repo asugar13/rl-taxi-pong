@@ -1,0 +1,16 @@
+# Core deep-RL stack
+numpy
+torch
+gymnasium[atari,toy-text]>=0.29
+ale-py>=0.8
+
+# Taxi DQN notebook (tables / plots)
+pandas
+matplotlib
+
+# Pong DQN notebook (Atari from pixels)
+opencv-python
+imageio[ffmpeg]
+
+# Run the notebooks locally (already available on Google Colab)
+jupyter
