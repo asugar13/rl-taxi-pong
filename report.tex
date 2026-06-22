@@ -35,7 +35,9 @@ hyperparameters influence \emph{how fast} the agent learns more than \emph{how w
 ends up performing. We close with a section on the \textbf{Deep Q-Network (DQN)} approach,
 which replaces the Q-table with a neural network --- including a multi-seed hyperparameter
 study (network size, regularization, and the RL knobs) and a replay-buffer $\times$
-target-network ablation --- and discuss when that added machinery is warranted.
+target-network ablation --- and discuss when that added machinery is warranted. As an optional
+extension we also apply the same DQN to Atari Pong from raw pixels, swapping the tabular-style MLP
+for a convolutional network and vanilla DQN for Double DQN.
 \end{abstract}
 
 % ======================================================================
@@ -252,6 +254,25 @@ $499$ is not ``larger'' than $12$ in any meaningful sense), each Taxi state is c
 \textbf{one-hot vector} of length $500$ before being fed to the network. This makes the DQN on
 Taxi close to a tabular method in disguise: with one-hot inputs the network learns essentially
 one independent column of weights per state, so there is little generalisation across states.
+
+\smallskip\noindent\textbf{Two ways to apply the same Bellman target.} The methods also
+\emph{update} differently. Tabular Q-learning edits one cell in place using the
+temporal-difference (TD) error --- the bracketed quantity in Eq.~\eqref{eq:bellman},
+$\delta = r + \gamma \max_{a'} Q(s',a') - Q(s,a)$, scaled by the learning rate $\alpha$. A neural
+network cannot edit individual outputs, so a DQN instead forms a fixed \textbf{bootstrap target}
+from the (frozen) target network,
+\[
+  y \;=\; r + \gamma \max_{a'} Q_{\theta^-}(s',a'),
+\]
+and \textbf{minimises a regression loss} between its prediction and that target by gradient descent,
+\[
+  \mathcal{L}(\theta) \;=\; \bigl(\,Q_{\theta}(s,a) - y\,\bigr)^2
+  \qquad\text{(Huber / smooth-}L_1\text{ in practice)},
+\]
+where $\theta$ is the online (policy) network and $\theta^-$ the target network. So the explicit
+subtraction of Eq.~\eqref{eq:bellman} becomes a squared (or Huber) loss the optimiser descends ---
+the same Bellman principle, different machinery (in-place table edit vs.\ backprop on a function
+approximator).
 
 \subsection{Architecture and key components}
 The DQN solution\footnote{Full code and outputs: \href{https://github.com/asugar13/rl-taxi-pong/blob/main/DQN_Taxi.ipynb}{\texttt{DQN\_Taxi.ipynb}}.} uses:
@@ -501,5 +522,50 @@ size, learning frequency, and a hard-vs-soft target update --- proved close to n
 config beating the defaults. The ablation, however, is decisive: the \emph{replay buffer} is the
 load-bearing component (without it the agent never learns the sparse reward), while the target
 network is only a modest refinement --- the opposite emphasis from CartPole.
+
+% ======================================================================
+\section{Optional extension: DQN on Pong from pixels}
+\label{sec:pong}
+% ======================================================================
+As an optional extension we apply the \emph{same} DQN to Atari \textbf{Pong}, learned directly from
+raw screen pixels.\footnote{Code: \href{https://github.com/asugar13/rl-taxi-pong/blob/main/DQN_Pong.ipynb}{\texttt{DQN\_Pong.ipynb}}.}
+The algorithm is unchanged --- replay buffer, target network, $\epsilon$-greedy, the Bellman target
+above --- but the \emph{representation} and \emph{scale} change completely.
+
+\subsection{How it works}
+A single observation is no longer an index but an \textbf{image}. The standard Atari pipeline turns
+each frame to greyscale, resizes it to $84\times84$, skips $4$ frames per action, and
+\textbf{stacks the last $4$ frames} into a $(4,84,84)$ tensor --- the stack is what lets the agent
+perceive motion (a single frame cannot show which way the ball is travelling). A
+\textbf{convolutional} Q-network (three conv layers, then a $512$-unit dense layer, then one
+Q-value per action) reads that stack. The rest is the same recipe scaled up: a $100$k
+\texttt{uint8} image replay buffer ($\sim$6\,GB), rewards clipped to $\{-1,0,+1\}$, a frame-based
+loop over ${\sim}1$--$2$M frames with the target network synced every $10$k frames, and
+checkpointing so a disconnected GPU session can resume.
+
+\subsection{Vanilla vs.\ Double DQN}
+The two notebooks also differ in \emph{one line} of the target computation. Both keep an online
+network $\theta$ and a target network $\theta^-$; the question is who \emph{selects} and who
+\emph{evaluates} the next action. \textbf{Vanilla} DQN (Taxi) lets the target network do both,
+fused into a single max:
+\[
+  y \;=\; r + \gamma \max_{a'} Q_{\theta^-}(s', a') .
+\]
+\textbf{Double} DQN (Pong) splits the two roles --- the online network \emph{selects} the action,
+the target network \emph{evaluates} it:
+\[
+  a^\star = \arg\max_{a'} Q_{\theta}(s', a'),
+  \qquad
+  y \;=\; r + \gamma\, Q_{\theta^-}(s', a^\star) .
+\]
+\noindent\textbf{Why.} The $\max$ over noisy Q-estimates is biased \emph{upward}: it preferentially
+selects whichever action got lucky positive noise, so the max of the estimates sits above the max
+of the true values, and because DQN bootstraps, that overestimation feeds back on itself. Splitting
+selection from evaluation \emph{decorrelates} the noise --- if the online net over-rates an action
+by chance, the frozen target net usually does not over-rate that same action, so the inflation
+largely cancels (van Hasselt, Guez \& Silver, 2016). The cost is essentially nil: both variants
+already maintain the two networks, so going Double is a one-line change to the target. Taxi uses
+vanilla because it is near-tabular and overestimation is harmless there; Pong's noisier pixel
+function-approximation makes the bias bite harder, so Double is the natural choice.
 
 \end{document}
