@@ -529,19 +529,57 @@ network is only a modest refinement --- the opposite emphasis from CartPole.
 % ======================================================================
 As an optional extension we apply the \emph{same} DQN to Atari \textbf{Pong}, learned directly from
 raw screen pixels.\footnote{Code: \href{https://github.com/asugar13/rl-taxi-pong/blob/main/DQN_Pong.ipynb}{\texttt{DQN\_Pong.ipynb}}.}
-The algorithm is unchanged --- replay buffer, target network, $\epsilon$-greedy, the Bellman target
-above --- but the \emph{representation} and \emph{scale} change completely.
+The learning algorithm barely changes --- replay buffer, target network, $\epsilon$-greedy, and a
+bootstrapped Bellman target all carry over, the lone refinement being a \emph{Double}-DQN target
+(detailed below) --- while the \emph{representation}, the \emph{scale}, and the \emph{engineering} change
+substantially.
+Table~\ref{tab:taxi-vs-pong} summarises the jump from Taxi.
 
-\subsection{How it works}
-A single observation is no longer an index but an \textbf{image}. The standard Atari pipeline turns
-each frame to greyscale, resizes it to $84\times84$, skips $4$ frames per action, and
-\textbf{stacks the last $4$ frames} into a $(4,84,84)$ tensor --- the stack is what lets the agent
-perceive motion (a single frame cannot show which way the ball is travelling). A
-\textbf{convolutional} Q-network (three conv layers, then a $512$-unit dense layer, then one
-Q-value per action) reads that stack. The rest is the same recipe scaled up: a $100$k
-\texttt{uint8} image replay buffer ($\sim$6\,GB), rewards clipped to $\{-1,0,+1\}$, a frame-based
-loop over ${\sim}1$--$2$M frames with the target network synced every $10$k frames, and
-checkpointing so a disconnected GPU session can resume.
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}l p{4.4cm} p{5.8cm}@{}}
+\toprule
+ & \textbf{Taxi DQN} & \textbf{Pong DQN} \\
+\midrule
+Observation         & state index (one-hot of $500$)      & $4$ stacked $84\times84$ greyscale frames \\
+One obs.\ Markov?   & yes --- the index is sufficient     & no --- stack $4$ frames (see below) \\
+Q-network           & MLP ($128$--$128$)                  & CNN (3 conv $\to$ $512$ dense), ``Nature DQN'' \\
+Input size          & $500$ discrete states               & ${\sim}28$k pixels per state $(4{\times}84{\times}84)$ \\
+Action space        & $6$ (all used)                      & $6\to3$ (NOOP / up / down) \\
+Reward              & native ($-10$ to $+20$)             & clipped to $\{-1,0,+1\}$ \\
+DQN target          & vanilla ($\max$)                    & \textbf{Double} DQN \\
+Replay buffer       & $50$k transitions                   & $100$k \texttt{uint8} images (${\sim}6$\,GB) \\
+$\epsilon$ schedule & decayed over episodes               & annealed over $200$k frames \\
+Target sync         & every $250$ steps                   & every $2$k frames \\
+Optimiser           & Adam, \texttt{lr}$=10^{-3}$         & Adam, \texttt{lr}$=10^{-4}$ \\
+Scale / compute     & ${\sim}$hundreds of episodes, CPU   & ${\sim}1$--$2$M frames, ${\sim}1.5$--$2$\,h on GPU/MPS \\
+\bottomrule
+\end{tabular}
+\caption{From Taxi to Pong: the learning \emph{algorithm} is identical, but the representation
+(pixels vs.\ an index), the network (CNN vs.\ MLP), and the scale all change. The $\epsilon$,
+action-space, and target-sync rows turned out to decide whether Pong learned at all
+(Section~\ref{sec:pong-debug}).}
+\label{tab:taxi-vs-pong}
+\end{table}
+
+\subsection{Observation, state, and the four-frame Markov window}
+In Taxi the environment hands us a state \emph{index}: a sufficient statistic that already satisfies
+the \textbf{Markov property} --- the next state and reward depend only on it and the chosen action. In
+Pong the observation is an \textbf{image}, and a single frame is \emph{not} Markovian: from one still
+you can read the ball's position but not its \emph{direction} or \emph{speed}, so the optimal action is
+genuinely undefined. We restore the Markov property the standard way --- by \textbf{stacking the last
+four frames} as the state,
+\[
+  s_t \;=\; \big(x_{t-3},\,x_{t-2},\,x_{t-1},\,x_t\big)\in\{0,\dots,255\}^{4\times84\times84},
+\]
+so that velocity (and even acceleration) becomes recoverable from differences across the stack. That
+four-frame window is precisely the piece Taxi got for free from its index; in Pong we have to construct
+it. The pipeline that produces each frame $x_t$: convert to greyscale, resize to $84\times84$, skip
+(and max-pool) $4$ emulator frames per action, then stack $4$ such frames. A \textbf{convolutional}
+Q-network (three conv layers, then a $512$-unit dense layer, then one Q-value per action) reads the
+stack; rewards are clipped to $\{-1,0,+1\}$, the $100$k \texttt{uint8} buffer holds memory at
+${\sim}6$\,GB, and checkpointing lets a disconnected GPU session resume.
 
 \subsection{Vanilla vs.\ Double DQN}
 The two notebooks also differ in \emph{one line} of the target computation. Both keep an online
@@ -567,5 +605,59 @@ largely cancels (van Hasselt, Guez \& Silver, 2016). The cost is essentially nil
 already maintain the two networks, so going Double is a one-line change to the target. Taxi uses
 vanilla because it is near-tabular and overestimation is harmless there; Pong's noisier pixel
 function-approximation makes the bias bite harder, so Double is the natural choice.
+
+\subsection{Results and final configuration}
+\label{sec:pong-debug}
+Our first full run never learned: at two million frames the score sat at the random-play baseline
+(${\approx}-21$) from start to finish, and greedy play lost every point. Instrumenting the agent showed
+this was not a bug but a \emph{configuration} that could not learn --- with $\epsilon$ annealed over the
+first $1$M of $2$M frames and the full $6$-action set, the policy collapsed onto a single action
+(near-identical Q-values everywhere) and never recovered. Two changes fix it: anneal $\epsilon$
+\emph{fast} (over $200$k frames) so the agent starts exploiting early, and expose only the three actions
+Pong needs (NOOP / up / down); a more frequent target sync ($2$k frames) helps too.
+
+With the corrected configuration (Table~\ref{tab:pong-config}) the \emph{same} network and update code
+learn Pong from raw pixels. The average score climbs off $-21$ within ${\sim}200$--$300$k frames, reaches
+break-even near $1$M, and a winning score by ${\sim}2$M\footnote{Recording of the trained agent in play:
+\href{https://github.com/asugar13/rl-taxi-pong/blob/main/pong.mp4}{\texttt{pong.mp4}}.}; as a concrete
+checkpoint, the $3$-action agent already averages ${\approx}-10$ at just $600$k frames --- a competitive
+paddle that returns most balls --- against the original recipe's flat $-21$ across the entire run.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Setting} & \textbf{Value} \\
+\midrule
+Observation         & $4\times84\times84$ greyscale stack (frame-skip $4$) \\
+Action set          & $3$ --- NOOP / up / down \\
+Reward              & clipped to $\{-1,0,+1\}$ \\
+Q-network           & ``Nature'' CNN: 3 conv $\to$ $512$-unit dense \\
+Target              & Double DQN, synced every $2$k frames \\
+\midrule
+Optimiser           & Adam, \texttt{lr}$=10^{-4}$ \\
+Discount $\gamma$   & $0.99$ \\
+Loss / grad clip    & Huber, gradient-norm $\le 10$ \\
+Batch size          & $32$ \\
+Replay buffer       & $100$k \texttt{uint8} transitions (${\sim}6$\,GB) \\
+Learning starts     & $10$k frames \\
+Train frequency     & $1$ gradient step per $4$ frames \\
+$\epsilon$ schedule & $1.0 \to 0.02$, linear over $200$k frames \\
+Total frames        & $2{\times}10^{6}$ \\
+\bottomrule
+\end{tabular}
+\caption{Final Pong-from-pixels configuration. The settings that turned the original flat-lining run
+into a learning one are the $3$-action set, the fast $\epsilon$-decay, and the $2$k-frame target sync;
+every other line is the same DQN recipe used for Taxi, scaled up.}
+\label{tab:pong-config}
+\end{table}
+
+In short, the same DQN framework that solved Taxi also solves Pong from pixels: the core machinery ---
+experience replay, a target network, $\epsilon$-greedy exploration, and the bootstrapped Bellman target
+--- carries over. The changes are the representation (a CNN over a four-frame stack), one
+\emph{algorithmic} refinement --- the \emph{Double}-DQN form of the target (online net selects, target
+net evaluates) in place of Taxi's vanilla $\max$ --- and the handful of training settings that decide
+whether exploration is ever converted into a winning policy.
 
 \end{document}
