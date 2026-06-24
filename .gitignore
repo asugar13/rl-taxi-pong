@@ -1,0 +1,41 @@
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.blg
+*.brf
+*.fdb_latexmk
+*.fls
+*.lof
+*.log
+*.lot
+*.out
+*.toc
+*.synctex.gz
+*.nav
+*.snm
+*.vrb
+*.xdv
+*.pdfsync
+*.dvi
+*.ps
+*.spl
+*.synctex
+*.synctex(busy)
+
+# LaTeX temp and backup files
+*~
+*.bak
+*.backup
+*.tmp
+*.tex~
+*.log~
+*.aux~
+
+# Latexmk files
+.latexmkrc
+*latexmk*
+
+# Editor files
+*.swp
+*.swo
+*.#*

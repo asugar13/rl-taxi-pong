@@ -6,7 +6,8 @@ Deep Q-Network (DQN) agents for two Gymnasium environments, built from scratch i
 
 | Notebook | Environment | What it does |
 |---|---|---|
-| [`RL_DQN_Taxi_solved.ipynb`](RL_DQN_Taxi_solved.ipynb) | **Taxi** (500 discrete states) | DQN with one-hot state encoding, experience replay, and a target network. Plus a hyperparameter study (network size & regularization → RL hyperparameters) and a replay-buffer × target-network ablation. Solves Taxi at 100% success. |
+| [`QLearning_Taxi.ipynb`](QLearning_Taxi.ipynb) | **Taxi** (500 discrete states) | Tabular Q-learning with four hyperparameter search strategies compared head-to-head: manual tuning, grid search, random search, and Hyperband (Optuna). All four reach 100% success; Hyperband finds a competitive config at ~¼ of grid search's compute cost. |
+| [`DQN_Taxi.ipynb`](DQN_Taxi.ipynb) | **Taxi** (500 discrete states) | DQN with one-hot state encoding, experience replay, and a target network. Plus a hyperparameter study (network size & regularization → RL hyperparameters) and a replay-buffer × target-network ablation. Solves Taxi at 100% success. |
 | [`DQN_Pong.ipynb`](DQN_Pong.ipynb) | **Atari Pong** (raw pixels) | Pixel-based DQN — Nature-style CNN + 4-frame stacking, **Double DQN**, experience replay, target network, and checkpointing. Tuned for a free Colab T4 GPU. |
 
 ## Setup
@@ -29,7 +30,8 @@ jupyter notebook
 
 ## Running
 
-- **Taxi** — runs on **CPU** in a few minutes. Run top to bottom; a roadmap table at the top links every section (build → hyperparameter study → ablation → wrap-up).
+- **Q-Learning Taxi** — runs on **CPU** in a few minutes. Four parts (manual → grid search → random search → Hyperband); run top to bottom.
+- **DQN Taxi** — runs on **CPU** in a few minutes. Run top to bottom; a roadmap table at the top links every section (build → hyperparameter study → ablation → wrap-up).
 - **Pong** — needs a **GPU** and **hours** (~1–2M frames; positive scores around ~1–1.5M).
   1. Run the **install** cell and the **smoke-test** cell first — the observation must print `(4, 84, 84)`.
   2. Then run training. It **checkpoints** periodically, so you can resume after a Colab disconnect (uncomment the resume block).
@@ -37,4 +39,4 @@ jupyter notebook
 
 ## Requirements
 
-See [`requirements.txt`](requirements.txt). Core stack: **PyTorch**, **Gymnasium** (`toy-text` for Taxi, `atari` for Pong), NumPy, Matplotlib, pandas, OpenCV, imageio.
+See [`requirements.txt`](requirements.txt). Core stack: **PyTorch**, **Gymnasium** (`toy-text` for Taxi, `atari` for Pong), NumPy, Matplotlib, pandas, OpenCV, imageio, **Optuna** (Hyperband search in Q-Learning Taxi), Plotly.
