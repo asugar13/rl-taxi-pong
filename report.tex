@@ -127,17 +127,23 @@ reproducible score.
 
 \subsection{Part 1 --- Manual training}
 With the values in Table~\ref{tab:hyperparams}, the agent trained for $25{,}000$ episodes.
-The learning curve climbs steeply in the first few thousand episodes and then flattens once a
-solid policy is found. The evaluated baseline:
+The learning curve (Figure~\ref{fig:manual-curve}) climbs steeply in the first few thousand
+episodes and then flattens once a solid policy is found. The evaluated baseline:
 \[
   \text{avg reward } 7.93, \qquad \text{avg steps } 13.1, \qquad \text{success } 100\%.
 \]
 
-% Uncomment and provide the exported figure to include the learning curve:
-% \begin{figure}[h]\centering
-%   \includegraphics[width=0.7\linewidth]{manual_learning_curve.png}
-%   \caption{Manual-baseline learning curve: episode reward (left axis) and $\epsilon$ (right axis).}
-% \end{figure}
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.85\linewidth]{manual_learning_curve.png}
+\caption{Manual-baseline learning curve (first $8{,}000$ episodes, where learning happens):
+training reward as a $100$-episode rolling average (left axis, blue) and the exploration rate
+$\epsilon$ (right axis, orange dotted). Reward climbs steeply over the first few thousand
+episodes and then flattens as $\epsilon$ decays and the agent shifts from exploring to
+exploiting. Code:
+\href{https://github.com/asugar13/rl-taxi-pong/blob/main/QLearning_Taxi.ipynb}{\texttt{QLearning\_Taxi.ipynb}}, Part~1.}
+\label{fig:manual-curve}
+\end{figure}
 
 \subsection{Part 2 --- Grid search}
 Grid search trains every combination of a fixed set of values: \texttt{learning\_rate}
@@ -185,11 +191,52 @@ The best trial scored $7.74$:
   \texttt{decay\_rate}=0.0049,\quad \texttt{min\_epsilon}=0.0021 .
 \]
 
+Optuna's own hyperparameter-importance estimate (fANOVA over the completed trials)
+confirms the ordering seen in the grid and random searches (Figure~\ref{fig:optuna-importance}):
+\texttt{min\_epsilon} dominates ($\approx 0.52$), with the $\epsilon$ \texttt{decay\_rate} a clear
+second ($\approx 0.31$) and \texttt{learning\_rate} and \texttt{gamma} contributing little
+($\approx 0.09$ each). In other words, how exploration is shut down --- both its floor and how
+fast it gets there --- matters far more than the learning rate or discount on this deterministic
+environment.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.85\linewidth]{optuna_importance.png}
+\caption{Optuna hyperparameter importance (fANOVA) over the $40$-trial Hyperband study.
+\texttt{min\_epsilon} is by far the strongest predictor of final score, followed by the
+$\epsilon$ \texttt{decay\_rate}; \texttt{learning\_rate} and \texttt{gamma} are near-negligible.
+Code:
+\href{https://github.com/asugar13/rl-taxi-pong/blob/main/QLearning_Taxi.ipynb}{\texttt{QLearning\_Taxi.ipynb}}, Part~4.}
+\label{fig:optuna-importance}
+\end{figure}
+
 \subsection{Part 5 --- Final comparison}
 \label{sec:comparison}
 The best configuration from each method was retrained for the full $25{,}000$ episodes and
 evaluated identically. Table~\ref{tab:search} summarises the best configurations and their
 search scores; Table~\ref{tab:final} reports the final evaluation.
+
+Plotting the four retrained runs side by side (Figure~\ref{fig:all-curves}) shows that the methods
+differ in \emph{how fast} they learn far more than in where they end up: all four climb to the same
+plateau, but the Optuna/Hyperband config converges fastest --- it reaches near-optimal reward within
+roughly the first thousand episodes, whereas the manual and grid configs take several thousand. The
+reason is visible in Table~\ref{tab:search}: Optuna's config pairs a high learning rate with a much
+faster $\epsilon$ decay ($0.0049$ vs.\ $0.0005$), so it stops exploring and commits to its policy
+early. Manual and grid share the slow decay $0.0005$ and their curves almost coincide. This is the
+same lesson as before --- on a deterministic environment with a unique optimal policy, tuning buys
+faster convergence rather than a better final policy.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.85\linewidth]{all_learning_curves.png}
+\caption{Learning curves (reward, $200$-episode rolling average) for the best configuration of each
+method, retrained for $25{,}000$ episodes and zoomed to the first $8{,}000$ where the differences
+appear. All four reach the same plateau; Optuna/Hyperband (green) gets there fastest thanks to its
+faster $\epsilon$ decay, while manual (blue) and grid (orange) share the slow decay and nearly
+overlap. Code:
+\href{https://github.com/asugar13/rl-taxi-pong/blob/main/QLearning_Taxi.ipynb}{\texttt{QLearning\_Taxi.ipynb}}, Part~5.}
+\label{fig:all-curves}
+\end{figure}
 
 \begin{table}[h]
 \centering
@@ -454,8 +501,7 @@ without it (\emph{target-only} and \emph{neither}) the agent never learns the sp
 fails completely ($0\%$ success, $-200$ reward). With it (\emph{both} and \emph{buffer-only}) it
 solves Taxi at $87$--$91\%$. The \textbf{target network adds only a modest gain} --- \emph{both}
 ($91.3\%$) over \emph{buffer-only} ($87.0\%$) --- so it is a useful refinement, not a necessity.
-This is exactly the opposite emphasis from CartPole, where the target network is the critical
-stabiliser; on near-tabular Taxi the buffer carries the load.
+On near-tabular Taxi, the replay buffer carries most of the load.
 
 \begin{table}[h]
 \centering
@@ -528,7 +574,7 @@ while it hurt the small one, and dropout broke both. The RL hyperparameters --- 
 size, learning frequency, and a hard-vs-soft target update --- proved close to neutral, no sampled
 config beating the defaults. The ablation, however, is decisive: the \emph{replay buffer} is the
 load-bearing component (without it the agent never learns the sparse reward), while the target
-network is only a modest refinement --- the opposite emphasis from CartPole.
+network is only a modest refinement.
 
 % ======================================================================
 \section{Optional extension: DQN on Pong from pixels}
@@ -626,9 +672,29 @@ Pong needs (NOOP / up / down); a more frequent target sync ($2$k frames) helps t
 With the corrected configuration (Table~\ref{tab:pong-config}) the \emph{same} network and update code
 learn Pong from raw pixels. The average score climbs off $-21$ within ${\sim}200$--$300$k frames, reaches
 break-even near $1$M, and a winning score by ${\sim}2$M\footnote{Recording of the trained agent in play:
-\href{https://github.com/asugar13/rl-taxi-pong/blob/main/pong.mp4}{\texttt{pong.mp4}}.}; as a concrete
-checkpoint, the $3$-action agent already averages ${\approx}-10$ at just $600$k frames --- a competitive
-paddle that returns most balls --- against the original recipe's flat $-21$ across the entire run.
+\href{https://github.com/asugar13/rl-taxi-pong/blob/main/pong.mp4}{\texttt{pong.mp4}}.}. In the saved run,
+the final training average over the last $20$ games is $7.45$; greedy evaluation over $5$ held-out episodes
+scores $14.6$ on average, and the recorded game scores $16.0$. As an earlier checkpoint, the $3$-action
+agent already averages ${\approx}-10$ at just $600$k frames --- a competitive paddle that returns most
+balls --- against the original recipe's flat $-21$ across the entire run.
+
+The learning curve for this run is shown in Figure~\ref{fig:pong-score}. The per-episode score (faint)
+is very noisy --- individual Pong games swing widely --- but the $20$-episode moving average tells the
+story cleanly: it sits on the $-21$ floor for the first ${\sim}200$ episodes while the buffer fills and
+$\epsilon$ is still high, then climbs steadily, crosses break-even around episode ${\sim}490$, and
+finishes averaging ${\approx}+7$. In other words the agent goes from losing every point to consistently
+beating the built-in opponent --- learned end-to-end from raw pixels.
+
+\begin{figure}[ht]
+\centering
+\includegraphics[width=0.72\linewidth]{pong_score.png}
+\caption{Pong-from-pixels learning curve for the corrected configuration (Table~\ref{tab:pong-config}):
+per-episode score (faint blue) and its $20$-episode moving average (orange). The average rises off the
+$-21$ random-play floor, crosses break-even ($0$, dashed), and ends positive --- the agent learns to win
+from raw pixels. Code:
+\href{https://github.com/asugar13/rl-taxi-pong/blob/main/DQN_Pong.ipynb}{\texttt{DQN\_Pong.ipynb}}, Step~10.}
+\label{fig:pong-score}
+\end{figure}
 
 \begin{table}[h]
 \centering
