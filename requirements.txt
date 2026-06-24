@@ -4,9 +4,11 @@ torch
 gymnasium[atari,toy-text]>=0.29
 ale-py>=0.8
 
-# Taxi DQN notebook (tables / plots)
+# Taxi notebooks (tables / plots / hyperparameter search)
 pandas
 matplotlib
+plotly
+optuna
 
 # Pong DQN notebook (Atari from pixels)
 opencv-python
