@@ -37,6 +37,20 @@ jupyter notebook
   2. Then run training. It **checkpoints** periodically, so you can resume after a Colab disconnect (uncomment the resume block).
   - On Apple Silicon it will use the **MPS** GPU automatically; on Colab it uses CUDA.
 
+## Videos
+
+### Q-Learning Taxi
+
+<video src="qlearning_taxi.mp4" controls width="720"></video>
+
+[Open the Taxi video](qlearning_taxi.mp4)
+
+### DQN Pong
+
+<video src="pong.mp4" controls width="720"></video>
+
+[Open the Pong video](pong.mp4)
+
 ## Requirements
 
 See [`requirements.txt`](requirements.txt). Core stack: **PyTorch**, **Gymnasium** (`toy-text` for Taxi, `atari` for Pong), NumPy, Matplotlib, pandas, OpenCV, imageio, **Optuna** (Hyperband search in Q-Learning Taxi), Plotly.
