@@ -41,15 +41,15 @@ jupyter notebook
 
 ### Q-Learning Taxi
 
-<video src="qlearning_taxi.mp4" controls width="720"></video>
+<video src="videos/qlearning_taxi.mp4" controls width="720"></video>
 
-[Open the Taxi video](qlearning_taxi.mp4)
+[Open the Taxi video](videos/qlearning_taxi.mp4)
 
 ### DQN Pong
 
-<video src="pong.mp4" controls width="720"></video>
+<video src="videos/pong.mp4" controls width="720"></video>
 
-[Open the Pong video](pong.mp4)
+[Open the Pong video](videos/pong.mp4)
 
 ## Requirements
 
