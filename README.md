@@ -1,4 +1,4 @@
-# RL — Taxi & Pong with DQN
+# Reinforcement Learning — Taxi & Pong with DQN
 
 Deep Q-Network (DQN) agents for two Gymnasium environments, built from scratch in PyTorch.
 
